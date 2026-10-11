@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { TEMPLATES, templatesFor } from '../lib/templates';
 import { validateDiagram, summarize } from '../lib/validate';
-import { assignHandles, alignNodes, distributeNodes, layoutGraph, nodeSize, NON_FLOW_SHAPES } from '../lib/layout';
+import { CONTAINER_SHAPES, assignHandles, alignNodes, distributeNodes, layoutGraph, nodeSize, NON_FLOW_SHAPES } from '../lib/layout';
 import { defaultNodeData } from '../shapes';
+import { useDiagram as useDiagramTest } from '../store/useDiagram';
 import type { DiagramKind, NotaEdge, NotaNode } from '../types';
 
 const ALL_KINDS: DiagramKind[] = ['bpmn', 'usecase', 'activity', 'class', 'dfd'];
@@ -170,6 +171,57 @@ describe('palet stensil', () => {
       expect(shapes.length).toBeGreaterThanOrEqual(5);
       // bentuk umum selalu tersedia di setiap jenis diagram
       expect(shapes).toEqual(expect.arrayContaining(['note', 'textBlock']));
+    }
+  });
+});
+
+describe('penyesuaian wadah', () => {
+  const checkInside = (nodes: NotaNode[], kind: DiagramKind) => {
+    const containers = nodes.filter((n) => CONTAINER_SHAPES.includes(n.data.shape));
+    const flow = nodes.filter((n) => !CONTAINER_SHAPES.includes(n.data.shape) && !NON_FLOW_SHAPES.includes(n.data.shape));
+    for (const node of flow) {
+      const size = nodeSize(node);
+      const cx = node.position.x + size.width / 2;
+      const cy = node.position.y + size.height / 2;
+      const inside = containers.some((c) => {
+        const cs = nodeSize(c);
+        return cx >= c.position.x && cx <= c.position.x + cs.width && cy >= c.position.y && cy <= c.position.y + cs.height;
+      });
+      expect(inside, `${kind}: ${node.id} berada di luar semua wadah`).toBe(true);
+    }
+  };
+
+  it('pool BPMN membungkus anggotanya setelah auto-layout', () => {
+    const template = TEMPLATES.find((t) => t.id === 'bpmn-collaboration')!;
+    const store = useDiagramTest.getState();
+    store.loadTemplate(template);
+    store.autoLayout('LR');
+    const nodes = useDiagramTest.getState().nodes;
+    checkInside(nodes, 'bpmn');
+    // pool tidak boleh saling menimpa
+    const pools = nodes
+      .filter((n) => n.data.shape === 'bpmnPool')
+      .map((n) => ({ x: n.position.x, y: n.position.y, w: nodeSize(n).width, h: nodeSize(n).height }))
+      .sort((a, b) => a.y - b.y);
+    for (let i = 1; i < pools.length; i += 1) {
+      expect(pools[i].y, 'pool saling menimpa').toBeGreaterThanOrEqual(pools[i - 1].y + pools[i - 1].h);
+    }
+  });
+
+  it('boundary use case membungkus use case setelah auto-layout', () => {
+    const template = TEMPLATES.find((t) => t.id === 'uc-advanced')!;
+    const store = useDiagramTest.getState();
+    store.loadTemplate(template);
+    store.autoLayout('TB');
+    const nodes = useDiagramTest.getState().nodes;
+    const boundary = nodes.find((n) => n.data.shape === 'ucBoundary')!;
+    const box = nodeSize(boundary);
+    for (const node of nodes.filter((n) => n.data.shape === 'ucUseCase')) {
+      const size = nodeSize(node);
+      expect(node.position.x).toBeGreaterThanOrEqual(boundary.position.x);
+      expect(node.position.y).toBeGreaterThanOrEqual(boundary.position.y);
+      expect(node.position.x + size.width).toBeLessThanOrEqual(boundary.position.x + box.width + 1);
+      expect(node.position.y + size.height).toBeLessThanOrEqual(boundary.position.y + box.height + 1);
     }
   });
 });

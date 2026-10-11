@@ -3,7 +3,7 @@ import { addEdge, applyEdgeChanges, applyNodeChanges, type Connection, type Edge
 import type { DiagramDoc, DiagramKind, DiagramTemplate, NotaEdge, NotaEdgeData, NotaNode, PathStyle, ShapeKey } from '../types';
 import { SHAPE_META, autoHeight, defaultNodeData } from '../shapes';
 import { dataForEdgeKind, defaultEdgeKind } from '../edges/kinds';
-import { assignHandles, alignNodes, distributeNodes, isContainerShape, layoutGraph, type AlignMode, type Direction } from '../lib/layout';
+import { assignHandles, alignNodes, distributeNodes, isContainerShape, layoutAll, type AlignMode, type Direction } from '../lib/layout';
 import type { ColorMode } from '../lib/theme';
 
 export interface Snapshot {
@@ -472,9 +472,10 @@ export const useDiagram = create<DiagramState>((set, get) => {
     /* ------------------------------------------------------------ tata letak */
     autoLayout: (direction = 'LR') => {
       const { nodes, edges } = get();
-      const laidOut = layoutGraph(nodes, edges, { direction });
-      const withHandles = assignHandles(laidOut, edges);
-      set({ nodes: laidOut, edges: withHandles });
+      // layoutAll menangani baik diagram biasa maupun yang memakai wadah
+      // (pool/lane/partisi/boundary) yang ukurannya ikut menyesuaikan isi
+      const laidOut = layoutAll(nodes, edges, { direction });
+      set({ nodes: laidOut, edges: assignHandles(laidOut, edges) });
       doCommit();
     },
 

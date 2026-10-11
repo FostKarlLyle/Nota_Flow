@@ -15,6 +15,9 @@ export const NON_FLOW_SHAPES: ShapeKey[] = [
   'textBlock',
 ];
 
+/** Wadah yang perlu disesuaikan ukurannya mengikuti isinya. */
+export const CONTAINER_SHAPES: ShapeKey[] = ['bpmnPool', 'bpmnLane', 'ucBoundary', 'actPartition', 'bpmnGroup'];
+
 export function isContainerShape(shape: ShapeKey): boolean {
   return (
     shape === 'bpmnPool' ||
@@ -128,6 +131,272 @@ export function bestSides(
   }
   if (dy >= 0) return { sourceSide: 'bottom', targetSide: 'top' };
   return { sourceSide: 'top', targetSide: 'bottom' };
+}
+
+
+/* ------------------------------------------------------------ wadah ------- */
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function boxOf(node: NotaNode, size = nodeSize(node)): Box {
+  return { x: node.position.x, y: node.position.y, width: size.width, height: size.height };
+}
+
+function containsPoint(box: Box, x: number, y: number): boolean {
+  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+}
+
+function containsBox(outer: Box, inner: Box): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+/** Wadah yang dipakai sebagai pengelompokan saat auto-layout. */
+export const LAYOUT_CONTAINERS: ShapeKey[] = ['bpmnPool', 'bpmnLane', 'ucBoundary', 'actPartition'];
+
+/**
+ * Tentukan wadah induk tiap elemen berdasarkan posisi saat ini.
+ * Induk = wadah terkecil yang memuat titik pusat elemen (wadah bertingkat
+ * seperti lane di dalam pool dideteksi lewat aturan tambahan).
+ */
+export function computeContainerParents(nodes: NotaNode[]): Map<string, string> {
+  const containers = nodes.filter((n) => CONTAINER_SHAPES.includes(n.data.shape));
+  const parents = new Map<string, string>();
+
+  for (const node of nodes) {
+    if (CONTAINER_SHAPES.includes(node.data.shape)) {
+      // wadah: induknya adalah wadah terkecil yang memuat seluruh kotaknya;
+      // bila tidak ada (mis. wadah digeser sedikit oleh pengguna), pakai
+      // wadah terkecil yang memuat titik pusatnya agar tetap terdeteksi
+      const size = nodeSize(node);
+      const box = boxOf(node, size);
+      const cx = node.position.x + size.width / 2;
+      const cy = node.position.y + size.height / 2;
+      let best: NotaNode | null = null;
+      let bestArea = Infinity;
+      let fallback: NotaNode | null = null;
+      let fallbackArea = Infinity;
+      for (const container of containers) {
+        if (container.id === node.id) continue;
+        const csize = nodeSize(container);
+        const cbox = boxOf(container, csize);
+        const area = csize.width * csize.height;
+        if (containsBox(cbox, box)) {
+          if (area < bestArea) {
+            best = container;
+            bestArea = area;
+          }
+        } else if (containsPoint(cbox, cx, cy) && area < fallbackArea) {
+          fallback = container;
+          fallbackArea = area;
+        }
+      }
+      const parent = best ?? fallback;
+      if (parent) parents.set(node.id, parent.id);
+      continue;
+    }
+
+    // elemen biasa: induk = wadah terkecil yang memuat titik pusatnya
+    const size = nodeSize(node);
+    const cx = node.position.x + size.width / 2;
+    const cy = node.position.y + size.height / 2;
+    let best: NotaNode | null = null;
+    let bestArea = Infinity;
+    for (const container of containers) {
+      const csize = nodeSize(container);
+      if (!containsPoint(boxOf(container, csize), cx, cy)) continue;
+      const area = csize.width * csize.height;
+      if (area < bestArea) {
+        best = container;
+        bestArea = area;
+      }
+    }
+    if (best) parents.set(node.id, best.id);
+  }
+
+  return parents;
+}
+
+/** Semua keturunan sebuah wadah (langsung maupun bertingkat). */
+function descendantsOf(containerId: string, parents: Map<string, string>): string[] {
+  const result: string[] = [];
+  const queue = [...parents.entries()].filter(([, parent]) => parent === containerId).map(([child]) => child);
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (result.includes(id)) continue;
+    result.push(id);
+    queue.push(...[...parents.entries()].filter(([, parent]) => parent === id).map(([child]) => child));
+  }
+  return result;
+}
+
+/**
+ * Susun ulang wadah (pool, lane, partisi, boundary) agar membungkus isinya.
+ * `parents` opsional — pakai hasil `computeContainerParents` dari posisi
+ * sebelum penataan agar keanggotaan tetap konsisten.
+ */
+export function refitContainers(nodes: NotaNode[], precomputedParents?: Map<string, string>): NotaNode[] {
+  const containers = nodes.filter((n) => CONTAINER_SHAPES.includes(n.data.shape));
+  if (!containers.length) return nodes;
+
+  const working = new Map<string, NotaNode>(nodes.map((n) => [n.id, { ...n, style: { ...n.style } }]));
+  const parents = precomputedParents ?? computeContainerParents(nodes);
+
+  // sesuaikan dari wadah terdalam (paling kecil) ke terluar
+  const ordered = [...containers].sort((a, b) => {
+    const sa = nodeSize(a);
+    const sb = nodeSize(b);
+    return sa.width * sa.height - sb.width * sb.height;
+  });
+
+  for (const container of ordered) {
+    const members = descendantsOf(container.id, parents).filter((id) => {
+      const [direct] = [parents.get(id)];
+      // langsung atau turunan tetap ikut dihitung lewat kotaknya
+      return !!direct;
+    });
+    if (!members.length) continue;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const id of members) {
+      const member = working.get(id);
+      if (!member) continue;
+      const size = nodeSize(member);
+      minX = Math.min(minX, member.position.x);
+      minY = Math.min(minY, member.position.y);
+      maxX = Math.max(maxX, member.position.x + size.width);
+      maxY = Math.max(maxY, member.position.y + size.height);
+    }
+    if (!Number.isFinite(minX)) continue;
+
+    const shape = container.data.shape;
+    const band = shape === 'bpmnPool' || shape === 'bpmnLane' ? 46 : shape === 'actPartition' ? 44 : 34;
+    const padTop = shape === 'ucBoundary' ? 62 : shape === 'actPartition' ? 58 : band;
+    const minSize = shape === 'bpmnLane' ? { width: 300, height: 90 } : { width: 240, height: 130 };
+    const width = Math.max(minSize.width, Math.round(maxX - minX + band + 34));
+    const height = Math.max(minSize.height, Math.round(maxY - minY + padTop + 34));
+    const current = working.get(container.id)!;
+    working.set(container.id, {
+      ...current,
+      position: { x: Math.round(minX - band), y: Math.round(minY - padTop) },
+      width,
+      height,
+      style: { ...current.style, width, height },
+    });
+  }
+
+  return nodes.map((node) => {
+    const updated = working.get(node.id);
+    if (!updated) return node;
+    return {
+      ...node,
+      position: updated.position,
+      width: updated.width ?? node.width,
+      height: updated.height ?? node.height,
+      style: { ...node.style, width: updated.width ?? node.style?.width, height: updated.height ?? node.style?.height },
+    };
+  });
+}
+
+/**
+ * Tata letak otomatis yang sadar wadah.
+ *
+ * Diagram dikelompokkan menurut wadah teratas (pool/lane/boundary/partisi).
+ * Isi tiap kelompok ditata terpisah agar tidak tercampur, wadah disesuaikan
+ * ukurannya, lalu kelompok-kelompok ditumpuk berurutan sehingga tidak saling
+ * menimpa — sesuai konvensi BPMN/UML (pool dan swimlane bertumpuk).
+ */
+export function layoutAll(nodes: NotaNode[], edges: NotaEdge[], options: LayoutOptions = {}): NotaNode[] {
+  const direction = options.direction ?? 'LR';
+  const containers = nodes.filter((n) => LAYOUT_CONTAINERS.includes(n.data.shape));
+  if (!containers.length) return layoutGraph(nodes, edges, options);
+
+  const parents = computeContainerParents(nodes);
+  const roots = containers.filter((c) => !parents.has(c.id));
+
+  // kelompok: tiap wadah teratas + isinya, ditambah elemen bebas di luar wadah
+  const groups: { root: string | null; members: string[] }[] = [];
+  const grouped = new Set<string>();
+  for (const root of roots) {
+    const descendants = descendantsOf(root.id, parents);
+    groups.push({ root: root.id, members: [root.id, ...descendants] });
+    grouped.add(root.id);
+    for (const id of descendants) grouped.add(id);
+  }
+  const free = nodes
+    .filter((n) => !grouped.has(n.id) && !LAYOUT_CONTAINERS.includes(n.data.shape))
+    .map((n) => n.id);
+  if (free.length) groups.push({ root: null, members: free });
+
+  const gap = 80;
+  let result = nodes;
+
+  const boxOfIds = (ids: string[]): Box => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const id of ids) {
+      const node = result.find((n) => n.id === id);
+      if (!node) continue;
+      const size = nodeSize(node);
+      minX = Math.min(minX, node.position.x);
+      minY = Math.min(minY, node.position.y);
+      maxX = Math.max(maxX, node.position.x + size.width);
+      maxY = Math.max(maxY, node.position.y + size.height);
+    }
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  };
+
+  const translate = (ids: string[], dx: number, dy: number) => {
+    const set = new Set(ids);
+    result = result.map((node) =>
+      set.has(node.id)
+        ? { ...node, position: { x: Math.round(node.position.x + dx), y: Math.round(node.position.y + dy) } }
+        : node,
+    );
+  };
+
+  // 1. tata isi tiap kelompok, lalu sesuaikan ukuran wadahnya
+  for (const group of groups) {
+    const flowIds = group.members.filter((id) => {
+      const node = nodes.find((n) => n.id === id);
+      return node && !LAYOUT_CONTAINERS.includes(node.data.shape);
+    });
+    if (!flowIds.length) continue;
+    result = layoutGraph(result, edges, { direction, onlyNodeIds: flowIds, nodeSep: options.nodeSep, rankSep: options.rankSep });
+    const content = boxOfIds(group.members);
+    if (!Number.isFinite(content.x)) continue;
+    translate(group.members, -content.x, -content.y);
+    // wadah (termasuk yang bertingkat) menyesuaikan isinya; setelah ini
+    // kotak wadah sudah membungkus seluruh isi kelompok
+    result = refitContainers(result, parents);
+    const box = boxOfIds(group.members);
+    translate(group.members, -box.x, -box.y);
+  }
+
+  // 2. tumpuk kelompok secara berurutan agar tidak saling menimpa
+  let cursorY = 0;
+  const ordered = [...groups].sort((a, b) => boxOfIds(a.members).y - boxOfIds(b.members).y);
+  for (const group of ordered) {
+    const box = boxOfIds(group.members);
+    if (!Number.isFinite(box.x)) continue;
+    translate(group.members, -box.x, cursorY - box.y);
+    cursorY += box.height + gap;
+  }
+
+  return result;
 }
 
 /* ------------------------------------------------------------ perataan --- */

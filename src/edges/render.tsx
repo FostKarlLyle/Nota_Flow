@@ -143,20 +143,32 @@ export function EdgeScene({ data, path, selected, theme, static: isStatic }: Edg
       ) : null}
 
       {labelLines.length ? (
-        <text
-          x={labelX}
-          y={labelY}
-          textAnchor="middle"
-          fontFamily={theme.font}
-          fontSize={labelSize}
-          fontWeight={600}
-          fill={baseColor}
-          stroke={theme.canvasBg}
-          strokeWidth={4}
-          paintOrder="stroke"
-          strokeLinejoin="round"
-          style={{ userSelect: 'none', pointerEvents: 'none' }}
-        >
+        <>
+          {/* latar tipis agar label tetap terbaca saat melewati garis lain */}
+          <rect
+            x={labelX - estimateLabelWidth(labelLines, labelSize) / 2 - 3}
+            y={labelY - (labelLines.length * labelSize * LINE_HEIGHT_FACTOR) / 2 - 2}
+            width={estimateLabelWidth(labelLines, labelSize) + 6}
+            height={labelLines.length * labelSize * LINE_HEIGHT_FACTOR + 3}
+            rx={3}
+            fill={theme.canvasBg}
+            fillOpacity={0.82}
+            style={{ pointerEvents: 'none' }}
+          />
+          <text
+            x={labelX}
+            y={labelY}
+            textAnchor="middle"
+            fontFamily={theme.font}
+            fontSize={labelSize}
+            fontWeight={600}
+            fill={baseColor}
+            stroke={theme.canvasBg}
+            strokeWidth={3}
+            paintOrder="stroke"
+            strokeLinejoin="round"
+            style={{ userSelect: 'none', pointerEvents: 'none' }}
+          >
           {labelLines.map((line, i) => (
             <tspan
               key={i}
@@ -165,9 +177,16 @@ export function EdgeScene({ data, path, selected, theme, static: isStatic }: Edg
             >
               {line}
             </tspan>
-          ))}
-        </text>
+            ))}
+          </text>
+        </>
       ) : null}
     </>
   );
+}
+
+/** Perkiraan lebar label untuk latar pembacaan (tanpa akses DOM). */
+function estimateLabelWidth(lines: string[], size: number): number {
+  const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
+  return longest * size * 0.58;
 }
