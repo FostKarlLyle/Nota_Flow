@@ -267,10 +267,13 @@ export const useDiagram = create<DiagramState>((set, get) => {
     addNodeAt: (shape, position, options) => {
       const meta = SHAPE_META[shape];
       const id = newId('n');
+      // jaga-jaga: koordinat NaN/Infinity bisa muncul sebelum kanvas terukur
+      const x = Number.isFinite(position.x) ? Math.round(position.x) : 0;
+      const y = Number.isFinite(position.y) ? Math.round(position.y) : 0;
       const node: NotaNode = {
         id,
         type: 'nota',
-        position,
+        position: { x, y },
         width: meta?.width ?? 140,
         height: meta?.height ?? 70,
         style: { width: meta?.width ?? 140, height: meta?.height ?? 70 },

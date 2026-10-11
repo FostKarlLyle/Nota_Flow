@@ -118,6 +118,11 @@ export function Canvas() {
       ref={wrapperRef}
       className={`relative h-full w-full ${connecting ? 'nota-connecting' : ''}`}
       style={style}
+      onDrop={onDrop}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
     >
       <ReactFlow<NotaNode, NotaEdge>
         nodes={nodes}
@@ -134,11 +139,6 @@ export function Canvas() {
         onPaneClick={() => setEditingNodeId(null)}
         onConnectStart={() => setConnecting(true)}
         onConnectEnd={() => setConnecting(false)}
-        onDrop={onDrop}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-        }}
         connectionMode={ConnectionMode.Loose}
         connectionLineType={ConnectionLineType.SmoothStep}
         connectionLineStyle={{ stroke: theme.accent, strokeWidth: 2, strokeDasharray: '6 4' }}
@@ -215,7 +215,7 @@ export function Canvas() {
 
       {nodes.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-          <div className="pointer-events-auto w-full max-w-3xl">
+          <div className="pointer-events-auto w-full max-w-2xl">
             <TemplateGallery empty />
           </div>
         </div>

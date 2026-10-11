@@ -157,3 +157,19 @@ describe('validasi', () => {
     expect(stats.error).toBe(0);
   });
 });
+
+describe('palet stensil', () => {
+  it('nama grup unik untuk setiap jenis diagram', async () => {
+    const { shapesFor } = await import('../shapes');
+    for (const kind of ALL_KINDS) {
+      const groups = shapesFor(kind);
+      const names = groups.map((g) => g.group);
+      expect(new Set(names).size, `grup duplikat pada ${kind}: ${names.join(', ')}`).toBe(names.length);
+      const shapes = groups.flatMap((g) => g.items);
+      expect(new Set(shapes).size, `stensil duplikat pada ${kind}`).toBe(shapes.length);
+      expect(shapes.length).toBeGreaterThanOrEqual(5);
+      // bentuk umum selalu tersedia di setiap jenis diagram
+      expect(shapes).toEqual(expect.arrayContaining(['note', 'textBlock']));
+    }
+  });
+});

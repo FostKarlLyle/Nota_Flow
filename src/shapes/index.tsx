@@ -896,7 +896,15 @@ export function shapesFor(kind: DiagramKind): { group: string; items: ShapeKey[]
     groups.set(group, list);
   }
   const result = [...groups.entries()].map(([group, items]) => ({ group, items }));
-  result.push({ group: 'Umum', items: COMMON_SHAPES });
-  // letakkan grup "Umum" di akhir, urutan sisanya sesuai deklarasi
+  // gabungkan bentuk umum ke grup "Umum" yang sudah ada agar nama grup tetap unik
+  const common = result.find((group) => group.group === 'Umum');
+  if (common) common.items = [...new Set([...common.items, ...COMMON_SHAPES])];
+  else result.push({ group: 'Umum', items: [...COMMON_SHAPES] });
+  // grup "Umum" selalu ditampilkan paling akhir
+  const commonIndex = result.findIndex((group) => group.group === 'Umum');
+  if (commonIndex >= 0 && commonIndex !== result.length - 1) {
+    const [commonGroup] = result.splice(commonIndex, 1);
+    result.push(commonGroup);
+  }
   return result;
 }

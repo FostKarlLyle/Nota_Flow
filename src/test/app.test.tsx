@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
 import { useDiagram } from '../store/useDiagram';
@@ -145,5 +145,36 @@ describe('ekspor', () => {
 
   it('menolak berkas yang tidak dikenali', () => {
     expect(() => parseDoc('{"foo":1}')).toThrow();
+  });
+});
+
+describe('seret & lepas stensil', () => {
+  it('menaruh elemen pada posisi drop di kanvas', async () => {
+    useDiagram.getState().reset('bpmn');
+    const { container } = render(<App />);
+    const wrapper = container.querySelector('.react-flow')!.parentElement as HTMLElement;
+    expect(wrapper).toBeTruthy();
+
+    const data = {
+      data: { 'application/notaflow-shape': 'bpmnServiceTask' } as Record<string, string>,
+      getData(type: string) {
+        return this.data[type] ?? '';
+      },
+      setData(type: string, value: string) {
+        this.data[type] = value;
+      },
+      dropEffect: 'copy',
+      effectAllowed: 'copy',
+      types: ['application/notaflow-shape'],
+    };
+    fireEvent.dragOver(wrapper, { dataTransfer: data });
+    fireEvent.drop(wrapper, { dataTransfer: data, clientX: 400, clientY: 300 });
+
+    await waitFor(() => {
+      const node = useDiagram.getState().nodes.find((n) => n.data.shape === 'bpmnServiceTask');
+      expect(node).toBeTruthy();
+      expect(Number.isFinite(node!.position.x)).toBe(true);
+      expect(Number.isFinite(node!.position.y)).toBe(true);
+    });
   });
 });
